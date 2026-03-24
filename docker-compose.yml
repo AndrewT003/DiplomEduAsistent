@@ -1,0 +1,45 @@
+version: '3.8'
+
+services:
+  # Backend сервіс
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: coursework_backend
+    ports:
+      - "8000:8000"
+    environment:
+      # Supabase credentials (замініть на свої!)
+      - SUPABASE_URL=${SUPABASE_URL}
+      - SUPABASE_KEY=${SUPABASE_KEY}
+      - SUPABASE_SERVICE_KEY=${SUPABASE_SERVICE_KEY}
+      - GROQ_API_KEY=${GROQ_API_KEY}
+      - QDRANT_URL=${QDRANT_URL}
+      - QDRANT_API_KEY=${QDRANT_API_KEY}
+    env_file:
+      - ./backend/.env
+    volumes:
+      # Для development - можна закоментувати для production
+      - ./backend:/app
+    restart: unless-stopped
+    networks:
+      - coursework_network
+
+  # Frontend сервіс
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: coursework_frontend
+    ports:
+      - "80:80"
+    depends_on:
+      - backend
+    restart: unless-stopped
+    networks:
+      - coursework_network
+
+networks:
+  coursework_network:
+    driver: bridge

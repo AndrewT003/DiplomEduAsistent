@@ -1,0 +1,19 @@
+# Dependencies
+node_modules
+
+# Build output
+dist
+build
+
+# IDE
+.idea
+.vscode
+.claude
+
+# Git
+.git
+.gitignore
+
+# Other
+*.md
+.env
