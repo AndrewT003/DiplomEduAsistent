@@ -644,8 +644,8 @@ def check_compliance_for_chunk_batch(
     print(f"  📋 Правила {start_rule_idx+1}-{start_rule_idx+len(selected_rules)} ({len(selected_rules)} правил)")
 
     # === НОВА ЛОГІКА: BATCH-ВАЛІДАЦІЯ ===
-    # Розбиваємо правила на батчі по 6 правил
-    batch_size = 6
+    # Розбиваємо правила на батчі по 3 правила (зменшено для відповідності ліміту Groq API)
+    batch_size = 3
     all_issues = []
     num_batches = (len(selected_rules) + batch_size - 1) // batch_size
 
@@ -656,9 +656,9 @@ def check_compliance_for_chunk_batch(
         batch_end = min(batch_start + batch_size, len(selected_rules))
         rules_batch = selected_rules[batch_start:batch_end]
 
-        # Додаємо невелику затримку між батчами (крім першого)
+        # Додаємо затримку між батчами для уникнення перевищення rate limit (крім першого)
         if batch_idx > 0:
-            time.sleep(0.5)
+            time.sleep(2.0)  # Збільшено з 0.5 до 2 секунд
 
         # Перевіряємо batch правил одним запитом
         batch_issues = check_compliance_batch(
@@ -867,9 +867,9 @@ def check_compliance_full_document(user_chunks: List[Dict], rules: List[Dict], r
     total_chunks = len(user_chunks)
     total_rules = len(rules)
 
-    # Параметри розбиття
-    chunk_batch_size = 40  # Чанків за один запит
-    rule_batch_size = 20   # Правил за один запит
+    # Параметри розбиття (зменшено для відповідності ліміту Groq API)
+    chunk_batch_size = 30  # Чанків за один запит (зменшено з 40)
+    rule_batch_size = 10   # Правил за один запит (зменшено з 20)
 
     num_chunk_batches = (total_chunks + chunk_batch_size - 1) // chunk_batch_size
     num_rule_batches = (total_rules + rule_batch_size - 1) // rule_batch_size

@@ -1,6 +1,15 @@
 """
 Модуль авторизації з Supabase Auth
 """
+import sys
+# Встановлюємо UTF-8 для Windows консолі
+if sys.platform == 'win32':
+    try:
+        sys.stdout.reconfigure(encoding='utf-8')
+        sys.stderr.reconfigure(encoding='utf-8')
+    except:
+        pass
+
 from fastapi import Depends, HTTPException, status
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from typing import Optional
@@ -25,8 +34,8 @@ def verify_token(token: str) -> dict:
     try:
         # Debug: декодуємо без верифікації щоб побачити payload
         unverified = jwt.decode(token, options={"verify_signature": False})
-        print(f"🔍 Token payload (unverified): {unverified}")
-        print(f"🔑 JWT_SECRET present: {bool(SUPABASE_JWT_SECRET)}")
+        print(f"[DEBUG] Token payload (unverified): {unverified}")
+        print(f"[DEBUG] JWT_SECRET present: {bool(SUPABASE_JWT_SECRET)}")
 
         # ТИМЧАСОВО: без верифікації signature (для тестування)
         # TODO: Потрібен правильний JWT_SECRET або використати RS256
@@ -35,7 +44,7 @@ def verify_token(token: str) -> dict:
             options={"verify_signature": False, "verify_aud": False}
         )
 
-        print(f"✅ Token verified (no signature check)")
+        print(f"[OK] Token verified (no signature check)")
         return payload
 
     except jwt.ExpiredSignatureError:
@@ -50,8 +59,8 @@ def verify_token(token: str) -> dict:
         )
     except Exception as e:
         import traceback
-        print(f"❌ Помилка верифікації токену: {str(e)}")
-        print(f"🔍 Traceback: {traceback.format_exc()}")
+        print(f"[ERROR] Помилка верифікації токену: {str(e)}")
+        print(f"[DEBUG] Traceback: {traceback.format_exc()}")
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail=f"Помилка авторизації: {str(e)}"

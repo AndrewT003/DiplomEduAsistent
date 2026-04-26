@@ -32,6 +32,12 @@ def extract_topic_from_context(context: str) -> str:
 
 def generate_material(context: str, material_type: str) -> dict:
     """Генерує навчальний матеріал і повертає контент + тему"""
+    # Обмежуємо контекст до 3000 символів (~750 токенів) для уникнення перевищення ліміту
+    max_context_length = 3000
+    if len(context) > max_context_length:
+        context = context[:max_context_length] + "\n\n[...контекст обрізано...]"
+        print(f"[WARNING] Контекст обрізано до {max_context_length} символів")
+
     # Витягуємо тему з контексту
     topic = extract_topic_from_context(context)
 
@@ -123,8 +129,8 @@ def generate_material(context: str, material_type: str) -> dict:
     response = groq_client.chat.completions.create(
         model="llama-3.1-8b-instant",
         messages=[{"role": "user", "content": prompts[material_type]}],
-        max_tokens=16000 if material_type == "summary" else 8000,  # Максимально збільшено для конспектів
-        temperature=0.5 if material_type == "summary" else 0.4   # Більше креативності для детальніших конспектів
+        max_tokens=4000 if material_type == "summary" else 2000,  # Зменшено для відповідності ліміту Groq API
+        temperature=0.5 if material_type == "summary" else 0.4
     )
 
     return {

@@ -71,12 +71,8 @@ app = FastAPI()
 # CORS налаштування для development і Docker
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[
-        "http://localhost:5173",  # Vite dev server
-        "http://localhost",        # Docker frontend
-        "http://localhost:3000",   # Alternative port
-    ],
-    allow_credentials=True,
+    allow_origins=["*"],  # Дозволяємо всі origins для розробки
+    allow_credentials=False,  # При allow_origins=["*"] credentials мають бути False
     allow_methods=["*"],
     allow_headers=["*"],
 )
@@ -371,7 +367,8 @@ def generate(doc_id: str, type: str, user: dict = Depends(get_current_user)):
     # Перевіряємо доступ до документа
     verify_document_access(doc_id, user)
 
-    context = search_context(doc_id, type)
+    # Зменшуємо limit до 5 для уникнення перевищення ліміту Groq API
+    context = search_context(doc_id, type, limit=5)
     result = generate_material(context, type)
 
     # Зберігаємо результат (використовуємо admin для bypass RLS)
@@ -905,3 +902,11 @@ def chat_validation(doc_id: str, body: dict, user: dict = Depends(get_current_us
     # За замовчуванням повертаємо форматований звіт
     formatted_report = format_report_for_chat(validation_result)
     return {"answer": formatted_report}
+
+
+if __name__ == "__main__":
+    import uvicorn
+    print("🚀 Запуск EduAssistant Backend...")
+    print("📖 Документація: http://localhost:8000/docs")
+    # Для reload потрібно передавати app як string import
+    uvicorn.run("main:app", host="0.0.0.0", port=8000, reload=True)
