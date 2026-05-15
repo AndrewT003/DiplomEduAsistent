@@ -177,36 +177,52 @@ def get_all_chunks_for_document(doc_id: str) -> list:
 
     Повертає чанки з інформацією про структуру (якщо доступна)
     """
-    results = qdrant.scroll(
-        collection_name=COLLECTION,
-        scroll_filter=Filter(
-            must=[FieldCondition(
-                key="doc_id",
-                match=MatchValue(value=doc_id)
-            )]
-        ),
-        limit=1000
-    )
+    print(f"  🔍 Запит до Qdrant для doc_id: {doc_id[:16]}...")
 
-    chunks = []
-    for point in results[0]:
-        chunk = {
-            "text": point.payload["text"],
-            "chunk_index": point.payload.get("chunk_index", 0),
-            "metadata": point.payload.get("metadata", {}),
-        }
+    try:
+        results = qdrant.scroll(
+            collection_name=COLLECTION,
+            scroll_filter=Filter(
+                must=[FieldCondition(
+                    key="doc_id",
+                    match=MatchValue(value=doc_id)
+                )]
+            ),
+            limit=1000
+        )
 
-        # Додаємо інформацію про структуру якщо вона є
-        if point.payload.get("has_formatting"):
-            chunk["section"] = point.payload.get("section", "N/A")
-            chunk["blocks"] = point.payload.get("blocks", [])
-            chunk["has_formatting"] = True
+        points_found = len(results[0]) if results and len(results) > 0 else 0
+        print(f"  📊 Знайдено {points_found} точок в Qdrant")
 
-        chunks.append(chunk)
+        chunks = []
+        for point in results[0]:
+            chunk = {
+                "text": point.payload["text"],
+                "chunk_index": point.payload.get("chunk_index", 0),
+                "metadata": point.payload.get("metadata", {}),
+            }
 
-    # Сортуємо по chunk_index
-    chunks.sort(key=lambda x: x["chunk_index"])
-    return chunks
+            # Додаємо інформацію про структуру якщо вона є
+            if point.payload.get("has_formatting"):
+                chunk["section"] = point.payload.get("section", "N/A")
+                chunk["blocks"] = point.payload.get("blocks", [])
+                chunk["has_formatting"] = True
+
+            chunks.append(chunk)
+
+        # Сортуємо по chunk_index
+        chunks.sort(key=lambda x: x["chunk_index"])
+
+        if not chunks:
+            print(f"  ⚠️ УВАГА: Для документа {doc_id} не знайдено жодного чанку в Qdrant!")
+
+        return chunks
+
+    except Exception as e:
+        print(f"  ❌ Помилка при отриманні чанків з Qdrant: {e}")
+        import traceback
+        print(f"  🔍 Traceback: {traceback.format_exc()}")
+        return []
 
 
 def search_regulatory_context(query: str, limit: int = 10) -> str:

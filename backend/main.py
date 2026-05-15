@@ -287,6 +287,11 @@ async def upload_document(
         print(f"🔍 [3/4] Індексація в Qdrant...")
         try:
             blocks = extract_text_with_formatting(content, file.filename)
+
+            # Перевіряємо чи є блоки
+            if not blocks or len(blocks) == 0:
+                raise ValueError("Витягнуто 0 блоків з форматуванням - використовую fallback")
+
             blocks_with_structure = detect_document_structure(blocks)
             index_document_with_structure(blocks_with_structure, doc_id, document_type="user")
             print(f"✅ Qdrant OK ({len(blocks)} блоків з форматуванням)")
@@ -295,8 +300,12 @@ async def upload_document(
             print(f"⚠️ Не вдалося витягнути форматування: {e}")
             print(f"📝 Використовую базове витягування тексту")
             text = extract_text(content, file.filename)
+
+            if not text or len(text.strip()) == 0:
+                raise Exception("Документ порожній або не містить текстового вмісту")
+
             index_document(text, doc_id, document_type="user")
-            print(f"✅ Qdrant OK (базове індексування)")
+            print(f"✅ Qdrant OK (базове індексування, {len(text)} символів)")
 
         indexed_in_qdrant = True
 
@@ -621,6 +630,11 @@ async def upload_regulatory(
         print(f"🔍 [3/4] Індексація в Qdrant...")
         try:
             blocks = extract_text_with_formatting(content, file.filename)
+
+            # Перевіряємо чи є блоки
+            if not blocks or len(blocks) == 0:
+                raise ValueError("Витягнуто 0 блоків з форматуванням - використовую fallback")
+
             blocks_with_structure = detect_document_structure(blocks)
             index_document_with_structure(blocks_with_structure, doc_id, document_type="regulatory")
             print(f"✅ Qdrant OK ({len(blocks)} блоків з форматуванням)")
@@ -629,8 +643,12 @@ async def upload_regulatory(
             print(f"⚠️ Не вдалося витягнути форматування: {e}")
             print(f"📝 Використовую базове витягування тексту")
             text = extract_text(content, file.filename)
+
+            if not text or len(text.strip()) == 0:
+                raise Exception("Документ порожній або не містить текстового вмісту")
+
             index_document(text, doc_id, document_type="regulatory")
-            print(f"✅ Qdrant OK (базове індексування)")
+            print(f"✅ Qdrant OK (базове індексування, {len(text)} символів)")
 
         indexed_in_qdrant = True
 
@@ -737,6 +755,70 @@ def get_extraction_status(doc_id: str, user: dict = Depends(get_current_user)):
     }
 
 
+@app.get("/documents/{doc_id}/diagnostic")
+def get_document_diagnostic(doc_id: str, user: dict = Depends(get_current_user)):
+    """Діагностика стану документа (перевірка БД + Qdrant)"""
+    # Перевіряємо доступ до документа
+    verify_document_access(doc_id, user)
+
+    # Інформація з БД
+    user_supabase = get_user_supabase(user["access_token"])
+    result = user_supabase.table("documents").select("*").eq("id", doc_id).execute()
+
+    if not result.data:
+        raise HTTPException(status_code=404, detail="Документ не знайдено")
+
+    doc = result.data[0]
+
+    # Перевірка Qdrant
+    from qdrant_client.models import Filter, FieldCondition, MatchValue
+    from config import qdrant
+
+    qdrant_chunks = 0
+    qdrant_error = None
+
+    try:
+        results = qdrant.scroll(
+            collection_name="edu_docs",
+            scroll_filter=Filter(
+                must=[FieldCondition(
+                    key="doc_id",
+                    match=MatchValue(value=doc_id)
+                )]
+            ),
+            limit=1000
+        )
+        qdrant_chunks = len(results[0]) if results and len(results) > 0 else 0
+    except Exception as e:
+        qdrant_error = str(e)
+
+    # Визначаємо чи є проблеми
+    issues = []
+
+    if doc.get("status") != "ready":
+        issues.append(f"Статус документа: {doc.get('status')} (очікується 'ready')")
+
+    if qdrant_chunks == 0 and not qdrant_error:
+        issues.append("Документ не проіндексований у векторній БД (0 чанків)")
+
+    if qdrant_error:
+        issues.append(f"Помилка доступу до Qdrant: {qdrant_error}")
+
+    return {
+        "id": doc_id,
+        "filename": doc.get("filename"),
+        "status": doc.get("status"),
+        "document_type": doc.get("document_type"),
+        "created_at": doc.get("created_at"),
+        "storage_url": doc.get("storage_url"),
+        "qdrant_chunks": qdrant_chunks,
+        "qdrant_error": qdrant_error,
+        "has_issues": len(issues) > 0,
+        "issues": issues,
+        "is_ready_for_validation": doc.get("status") == "ready" and qdrant_chunks > 0
+    }
+
+
 @app.get("/documents/{doc_id}/extraction-metrics")
 def get_extraction_metrics(doc_id: str, user: dict = Depends(get_current_user)):
     """Отримати метрики витягування правил для документу"""
@@ -752,6 +834,103 @@ def get_extraction_metrics(doc_id: str, user: dict = Depends(get_current_user)):
         return {"message": "Метрики не знайдено", "metrics": []}
 
     return {"metrics": result.data}
+
+
+@app.post("/documents/{doc_id}/reindex")
+def reindex_document(doc_id: str, user: dict = Depends(get_current_user)):
+    """Переіндексувати документ у Qdrant (якщо чанки втрачені)"""
+    # Перевіряємо доступ до документа
+    doc = verify_document_access(doc_id, user)
+
+    print(f"🔄 Переіндексація документа {doc_id} ({doc.get('filename')})...")
+
+    try:
+        # Завантажуємо файл з storage
+        storage_url = doc.get("storage_url")
+        if not storage_url:
+            raise HTTPException(status_code=400, detail="Документ не має файлу у storage")
+
+        print(f"📥 Завантаження файлу з storage: {storage_url}")
+        file_data = supabase.storage.from_("documents").download(storage_url)
+
+        if not file_data:
+            raise HTTPException(status_code=404, detail="Файл не знайдено у storage")
+
+        # Видаляємо старі чанки з Qdrant (якщо є)
+        print(f"🗑️ Видаляю старі чанки з Qdrant...")
+        from qdrant_client.models import Filter, FieldCondition, MatchValue
+        from config import qdrant
+
+        try:
+            results = qdrant.scroll(
+                collection_name="edu_docs",
+                scroll_filter=Filter(
+                    must=[FieldCondition(
+                        key="doc_id",
+                        match=MatchValue(value=doc_id)
+                    )]
+                ),
+                limit=1000
+            )
+            point_ids = [p.id for p in results[0]]
+            if point_ids:
+                qdrant.delete(collection_name="edu_docs", points_selector=point_ids)
+                print(f"✅ Видалено {len(point_ids)} старих точок")
+        except Exception as e:
+            print(f"⚠️ Помилка при видаленні старих чанків: {e}")
+
+        # Переіндексуємо документ
+        print(f"🔍 Індексація документа...")
+        try:
+            blocks = extract_text_with_formatting(file_data, doc.get("filename"))
+
+            # Перевіряємо чи є блоки
+            if not blocks or len(blocks) == 0:
+                raise ValueError("Витягнуто 0 блоків з форматуванням - використовую fallback")
+
+            blocks_with_structure = detect_document_structure(blocks)
+            index_document_with_structure(
+                blocks_with_structure,
+                doc_id,
+                document_type=doc.get("document_type", "user")
+            )
+            print(f"✅ Документ переіндексовано ({len(blocks)} блоків)")
+        except Exception as e:
+            # Fallback на базове індексування
+            print(f"⚠️ Не вдалося витягнути форматування: {e}")
+            print(f"📝 Використовую базове індексування")
+            text = extract_text(file_data, doc.get("filename"))
+
+            if not text or len(text.strip()) == 0:
+                raise HTTPException(
+                    status_code=400,
+                    detail="Документ порожній або не містить текстового вмісту. Перевірте файл."
+                )
+
+            index_document(text, doc_id, document_type=doc.get("document_type", "user"))
+            print(f"✅ Документ переіндексовано (базове, {len(text)} символів)")
+
+        # Оновлюємо статус
+        supabase_admin.table("documents").update(
+            {"status": "ready"}
+        ).eq("id", doc_id).execute()
+
+        return {
+            "message": "Документ успішно переіндексовано",
+            "id": doc_id,
+            "filename": doc.get("filename")
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        import traceback
+        print(f"❌ Помилка при переіндексації: {e}")
+        print(f"🔍 Traceback: {traceback.format_exc()}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Помилка переіндексації: {str(e)}"
+        )
 
 
 @app.post("/validate/{doc_id}")

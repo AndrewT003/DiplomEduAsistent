@@ -117,16 +117,28 @@ def extract_from_pdf_with_formatting(file_bytes: bytes) -> List[Dict]:
 
 def extract_from_docx(file_bytes: bytes) -> str:
     """Витягує тільки текст з DOCX"""
+    print(f"  📄 Базове витягування тексту з DOCX ({len(file_bytes)} байт)...")
     doc = Document(BytesIO(file_bytes))
     text = ""
+    total_paragraphs = len(doc.paragraphs)
+    print(f"  📊 Знайдено параграфів: {total_paragraphs}")
+
     for paragraph in doc.paragraphs:
         if paragraph.text.strip():
             text += paragraph.text + "\n"
-    return text.strip()
+
+    text = text.strip()
+    print(f"  ✅ Витягнуто {len(text)} символів тексту")
+
+    if len(text) == 0:
+        print(f"  ⚠️ УВАГА: Документ не містить текстового вмісту!")
+
+    return text
 
 
 def extract_from_docx_with_formatting(file_bytes: bytes) -> List[Dict]:
     """Витягує текст з DOCX разом з форматуванням"""
+    print(f"  📄 Парсинг DOCX файлу ({len(file_bytes)} байт)...")
     doc = Document(BytesIO(file_bytes))
     blocks = []
 
@@ -138,6 +150,9 @@ def extract_from_docx_with_formatting(file_bytes: bytes) -> List[Dict]:
         WD_ALIGN_PARAGRAPH.JUSTIFY: "justify",
         None: "left"
     }
+
+    total_paragraphs = len(doc.paragraphs)
+    print(f"  📊 Знайдено параграфів у DOCX: {total_paragraphs}")
 
     for paragraph in doc.paragraphs:
         if paragraph.text.strip():
@@ -169,6 +184,12 @@ def extract_from_docx_with_formatting(file_bytes: bytes) -> List[Dict]:
                 "italic": italic,
                 "page": None  # DOCX не має явних сторінок
             })
+
+    print(f"  ✅ Витягнуто {len(blocks)} блоків з непорожнім текстом")
+
+    if len(blocks) == 0:
+        print(f"  ⚠️ УВАГА: Не знайдено жодного блоку з текстом!")
+        print(f"  📝 Всі {total_paragraphs} параграфів порожні або містять тільки пробіли")
 
     return blocks
 

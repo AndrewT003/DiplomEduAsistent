@@ -581,10 +581,75 @@ export default function Home() {
             setSidebarOpen(true)
             setShowDocsSidebar(false) // Закриваємо лівий sidebar
         } catch (err) {
+            console.error('Validation error:', err)
+            console.error('Error response:', err.response?.data)
             const errorMsg = err.response?.data?.detail || 'Помилка валідації документу'
+
+            // Якщо помилка про відсутність чанків - пропонуємо переіндексацію
+            if (errorMsg.includes('проіндексованого вмісту') || errorMsg.includes('не містить текстового вмісту')) {
+                const shouldReindex = window.confirm(
+                    `${errorMsg}\n\nХочете спробувати переіндексувати документ автоматично?`
+                )
+                if (shouldReindex) {
+                    await reindexDocument(currentDoc.id)
+                    return
+                }
+            }
+
             showToast(errorMsg, 'error')
         } finally {
             setLoading(false)
+        }
+    }
+
+    async function reindexDocument(docId) {
+        setLoading(true)
+        addMessage('assistant', '🔄 Переіндексую документ...')
+
+        try {
+            await API.post(`/documents/${docId}/reindex`)
+            showToast('Документ успішно переіндексовано!', 'success')
+            addMessage('assistant', '✅ Документ переіндексовано. Спробуйте валідацію ще раз.')
+        } catch (err) {
+            const errorMsg = err.response?.data?.detail || 'Помилка переіндексації'
+            showToast(errorMsg, 'error')
+            addMessage('assistant', `❌ Помилка: ${errorMsg}`)
+        } finally {
+            setLoading(false)
+        }
+    }
+
+    async function checkDocumentHealth(docId) {
+        try {
+            const res = await API.get(`/documents/${docId}/diagnostic`)
+            const diag = res.data
+
+            console.log('Document diagnostic:', diag)
+
+            let message = `📊 Діагностика документа:\n\n`
+            message += `📄 Файл: ${diag.filename}\n`
+            message += `📈 Статус: ${diag.status}\n`
+            message += `🗄️ Чанків у Qdrant: ${diag.qdrant_chunks}\n`
+            message += `✅ Готовий до валідації: ${diag.is_ready_for_validation ? 'Так' : 'Ні'}\n`
+
+            if (diag.has_issues) {
+                message += `\n⚠️ Проблеми:\n`
+                diag.issues.forEach(issue => {
+                    message += `  • ${issue}\n`
+                })
+            }
+
+            addMessage('assistant', message)
+
+            if (!diag.is_ready_for_validation) {
+                const shouldFix = window.confirm('Документ має проблеми. Спробувати виправити автоматично?')
+                if (shouldFix) {
+                    await reindexDocument(docId)
+                }
+            }
+        } catch (err) {
+            console.error('Diagnostic error:', err)
+            showToast('Помилка діагностики', 'error')
         }
     }
 

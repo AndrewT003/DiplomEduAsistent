@@ -3,7 +3,7 @@ import time
 import os
 from datetime import datetime
 from typing import Dict, List
-from config import supabase, groq_client
+from config import supabase, supabase_admin, groq_client
 from rag_engine import get_all_chunks_for_document, search_regulatory_context
 
 # Імпортуємо спеціалізовані валідатори
@@ -55,7 +55,7 @@ _rules_cache = {}
 def save_extraction_metrics(doc_id: str, metrics: Dict):
     """Зберігає метрики витягування правил у БД"""
     try:
-        supabase.table("extraction_metrics").insert(metrics).execute()
+        supabase_admin.table("extraction_metrics").insert(metrics).execute()
         print(f"📊 Метрики збережено для документу {doc_id}")
     except Exception as e:
         print(f"⚠️ Не вдалося зберегти метрики: {e}")
@@ -279,7 +279,7 @@ def extract_regulatory_rules(regulatory_doc_id: str, regulatory_doc_name: str) -
 
     # Перевіряємо чи є правила в БД та отримуємо категорію
     print(f"🔍 Перевіряю БД на наявність правил для {regulatory_doc_name}...")
-    doc_result = supabase.table("documents").select("extracted_rules, regulatory_category").eq("id", regulatory_doc_id).execute()
+    doc_result = supabase_admin.table("documents").select("extracted_rules, regulatory_category").eq("id", regulatory_doc_id).execute()
 
     regulatory_category = None
     if doc_result.data:
@@ -394,7 +394,7 @@ def extract_regulatory_rules(regulatory_doc_id: str, regulatory_doc_name: str) -
     # Зберігаємо в БД для майбутнього використання (економія токенів!)
     try:
         print(f"💾 Зберігаю правила в БД...")
-        supabase.table("documents").update({
+        supabase_admin.table("documents").update({
             "extracted_rules": rules
         }).eq("id", regulatory_doc_id).execute()
         print(f"✅ Витягнуто {len(rules)} правил з {regulatory_doc_name} та збережено в БД")
@@ -701,7 +701,7 @@ def run_specialized_validators(
     issues = []
 
     # Отримуємо інформацію про документ
-    doc_result = supabase.table("documents").select("storage_url").eq("id", user_doc_id).execute()
+    doc_result = supabase_admin.table("documents").select("storage_url").eq("id", user_doc_id).execute()
     if not doc_result.data:
         return []
 
@@ -736,7 +736,7 @@ def run_specialized_validators(
 
                     for reg_doc_id in regulatory_doc_ids:
                         # Отримуємо правила та категорію документа
-                        reg_doc = supabase.table("documents").select(
+                        reg_doc = supabase_admin.table("documents").select(
                             "extracted_rules, regulatory_category, filename"
                         ).eq("id", reg_doc_id).execute()
 
@@ -1045,7 +1045,7 @@ def validate_document(
 
         try:
             # Шукаємо в останньому звіті валідації
-            cache_result = supabase.table("validation_reports").select("*").eq(
+            cache_result = supabase_admin.table("validation_reports").select("*").eq(
                 "user_document_id", user_doc_id
             ).order("created_at", desc=True).limit(1).execute()
 
@@ -1086,21 +1086,34 @@ def validate_document(
 
     # === ЗВИЧАЙНА ВАЛІДАЦІЯ (якщо кешу немає) ===
 
+    # ПРИМІТКА: Використовуємо supabase_admin для bypass RLS,
+    # оскільки доступ вже перевірено через verify_document_access у main.py
+
     # Перевіряємо чи документ існує
-    doc_result = supabase.table("documents").select("*").eq("id", user_doc_id).execute()
+    doc_result = supabase_admin.table("documents").select("*").eq("id", user_doc_id).execute()
     if not doc_result.data:
         return {"error": "Документ не знайдено"}
 
     user_doc = doc_result.data[0]
+    print(f"📄 Документ: {user_doc.get('filename')} (статус: {user_doc.get('status')})")
+
+    # Перевіряємо статус документа
+    if user_doc.get("status") != "ready":
+        return {
+            "error": f"Документ ще обробляється (статус: {user_doc.get('status')}). "
+                    f"Зачекайте поки завантаження завершиться."
+        }
 
     # Перевіряємо чи це не нормативний документ
     if user_doc.get("document_type") == "regulatory":
         return {"error": "Не можна валідувати нормативний документ"}
 
     # Отримуємо нормативні документи з фільтрацією
-    query = supabase.table("documents").select("*").eq(
+    # ПРИМІТКА: Використовуємо supabase_admin для отримання нормативів,
+    # оскільки користувач має доступ до своїх нормативів через user_id фільтр
+    query = supabase_admin.table("documents").select("*").eq(
         "document_type", "regulatory"
-    ).eq("status", "ready")
+    ).eq("status", "ready").eq("user_id", user_doc.get("user_id"))
 
     # Фільтр по конкретних ID
     if regulatory_doc_ids:
@@ -1113,10 +1126,10 @@ def validate_document(
     regulatory_docs_result = query.execute()
 
     if not regulatory_docs_result.data:
-        # Перевіряємо чи взагалі є нормативні документи
-        all_regulatory = supabase.table("documents").select("id, filename, regulatory_category").eq(
+        # Перевіряємо чи взагалі є нормативні документи для цього користувача
+        all_regulatory = supabase_admin.table("documents").select("id, filename, regulatory_category").eq(
             "document_type", "regulatory"
-        ).eq("status", "ready").execute()
+        ).eq("status", "ready").eq("user_id", user_doc.get("user_id")).execute()
 
         if not all_regulatory.data:
             return {"error": "Немає завантажених нормативних документів для валідації"}
@@ -1136,11 +1149,19 @@ def validate_document(
     print(f"✅ Знайдено {len(regulatory_docs)} нормативних документів для валідації")
 
     # Отримуємо чанки користувацького документа
+    print(f"📥 Отримую чанки документа з Qdrant...")
     user_chunks = get_all_chunks_for_document(user_doc_id)
-    if not user_chunks:
-        return {"error": "Документ не містить текстового вмісту"}
 
-    print(f"Документ містить {len(user_chunks)} чанків")
+    if not user_chunks:
+        error_msg = (
+            f"❌ Документ не містить проіндексованого вмісту у векторній БД. "
+            f"Можливо документ не був повністю завантажений або сталася помилка при індексації. "
+            f"Спробуйте завантажити документ заново."
+        )
+        print(error_msg)
+        return {"error": error_msg}
+
+    print(f"✅ Документ містить {len(user_chunks)} чанків")
 
     # === КРОК 1: СПЕЦІАЛІЗОВАНІ ВАЛІДАТОРИ (БЕЗ LLM) ===
     print(f"\n{'='*60}")
@@ -1204,11 +1225,12 @@ def validate_document(
 
     # Зберігаємо звіт у БД
     try:
-        report = supabase.table("validation_reports").insert({
+        report = supabase_admin.table("validation_reports").insert({
             "user_document_id": user_doc_id,
             "regulatory_documents": regulatory_docs_used,
             "validation_result": validation_result,
-            "status": "completed"
+            "status": "completed",
+            "user_id": user_doc.get("user_id")  # Додаємо user_id для RLS
         }).execute()
 
         validation_result["report_id"] = report.data[0]["id"]
