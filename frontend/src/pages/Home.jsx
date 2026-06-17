@@ -27,12 +27,19 @@ const COLORS = {
     inputBg: '#3a3a3a',
 }
 
-function ValidationReportView({ report, colors }) {
+function ValidationReportView({ report, colors, validationCategories, timestamp }) {
     const severityColors = {
         critical: '#ef4444',
         major: '#f97316',
         minor: '#eab308',
         info: '#3b82f6'
+    }
+
+    const categoryLabels = {
+        content: 'Змістовна',
+        formatting: 'Форматна',
+        structure: 'Структурна',
+        references: 'Посилання'
     }
 
     const severityIcon = (severity) => {
@@ -101,6 +108,60 @@ function ValidationReportView({ report, colors }) {
                     </div>
                 </div>
             </div>
+
+            {/* Validation Info */}
+            {(validationCategories || timestamp) && (
+                <div style={{
+                    background: colors.inputBg,
+                    borderRadius: '10px',
+                    padding: '12px 16px',
+                    marginBottom: '20px',
+                    fontSize: '12px'
+                }}>
+                    {timestamp && (
+                        <div style={{
+                            color: colors.muted,
+                            marginBottom: validationCategories && validationCategories.length > 0 ? '8px' : '0'
+                        }}>
+                            <strong>Дата валідації:</strong> {timestamp}
+                        </div>
+                    )}
+                    <div>
+                        <div style={{ color: colors.muted, marginBottom: '8px', fontSize: '11px' }}>
+                            <strong>Категорії перевірки:</strong>
+                        </div>
+                        <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
+                            {validationCategories && validationCategories.length > 0 ? (
+                                validationCategories.map(cat => (
+                                    <span key={cat} style={{
+                                        padding: '4px 10px',
+                                        background: colors.accent + '20',
+                                        border: `1px solid ${colors.accent}`,
+                                        borderRadius: '6px',
+                                        fontSize: '11px',
+                                        fontWeight: '600',
+                                        color: colors.accent
+                                    }}>
+                                        {categoryLabels[cat] || cat}
+                                    </span>
+                                ))
+                            ) : (
+                                <span style={{
+                                    padding: '4px 10px',
+                                    background: colors.accent + '20',
+                                    border: `1px solid ${colors.accent}`,
+                                    borderRadius: '6px',
+                                    fontSize: '11px',
+                                    fontWeight: '600',
+                                    color: colors.accent
+                                }}>
+                                    Всі категорії
+                                </span>
+                            )}
+                        </div>
+                    </div>
+                </div>
+            )}
 
             {/* Score */}
             <div style={{
@@ -573,7 +634,10 @@ export default function Home() {
                     content: result,
                     materialType: 'validation',
                     docId: currentDoc.id,
-                    isValidation: true
+                    isValidation: true,
+                    validationCategories: selectedCategories,
+                    timestamp: new Date().toLocaleString('uk-UA'),
+                    reportId: result.report_id  // Зберігаємо ID звіту для завантаження
                 }]
                 setPreviewIndex(updated.length - 1)
                 return updated
@@ -668,12 +732,15 @@ export default function Home() {
         }
     }
 
-    async function downloadValidationReport(docId) {
+    async function downloadValidationReport(docId, reportId) {
         try {
-            const res = await API.get(`/validate/${docId}/report/download`, { responseType: 'blob' })
-            const url = URL.createObjectURL(res.data)
+            const url = reportId
+                ? `/validate/${docId}/report/${reportId}/download`
+                : `/validate/${docId}/report/download`
+            const res = await API.get(url, { responseType: 'blob' })
+            const blobUrl = URL.createObjectURL(res.data)
             const a = document.createElement('a')
-            a.href = url
+            a.href = blobUrl
             a.download = `validation_report_${docId}.docx`
             a.click()
             showToast('Звіт успішно завантажено', 'success')
@@ -1482,7 +1549,18 @@ export default function Home() {
                                         {preview ? typeLabels[preview.materialType] : ''}
                                     </div>
                                     <div style={{ fontSize: '11px', color: COLORS.muted }}>
-                                        {previewIndex + 1} / {previews.length}
+                                        {preview?.isValidation && preview?.validationCategories?.length > 0 ? (
+                                            `${preview.validationCategories.map(cat => ({
+                                                content: 'Змістовна',
+                                                formatting: 'Форматна',
+                                                structure: 'Структурна',
+                                                references: 'Посилання'
+                                            })[cat]).join(', ')} • ${previewIndex + 1}/${previews.length}`
+                                        ) : preview?.isValidation ? (
+                                            `Всі категорії • ${previewIndex + 1}/${previews.length}`
+                                        ) : (
+                                            `${previewIndex + 1} / ${previews.length}`
+                                        )}
                                     </div>
                                 </div>
                             </div>
@@ -1491,7 +1569,7 @@ export default function Home() {
                                     <button
                                         onClick={() => {
                                             if (preview.isValidation) {
-                                                downloadValidationReport(preview.docId)
+                                                downloadValidationReport(preview.docId, preview.reportId)
                                             } else {
                                                 downloadDocx(preview.docId, preview.materialType)
                                             }
@@ -1521,7 +1599,12 @@ export default function Home() {
                         <div style={{ flex: 1, overflowY: 'auto', padding: '20px', minWidth: '420px' }}>
                             {preview && (
                                 preview.isValidation ? (
-                                    <ValidationReportView report={preview.content} colors={COLORS} />
+                                    <ValidationReportView
+                                        report={preview.content}
+                                        colors={COLORS}
+                                        validationCategories={preview.validationCategories}
+                                        timestamp={preview.timestamp}
+                                    />
                                 ) : (
                                     <div style={{
                                         background: COLORS.surface,

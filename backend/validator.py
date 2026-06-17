@@ -1229,6 +1229,7 @@ def validate_document(
             "user_document_id": user_doc_id,
             "regulatory_documents": regulatory_docs_used,
             "validation_result": validation_result,
+            "validation_categories": categories or [],  # Зберігаємо категорії валідації
             "status": "completed",
             "user_id": user_doc.get("user_id")  # Додаємо user_id для RLS
         }).execute()

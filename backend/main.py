@@ -997,6 +997,7 @@ def get_validation_report(doc_id: str, user: dict = Depends(get_current_user)):
         "report_id": report["id"],
         "validation_result": report["validation_result"],
         "regulatory_documents": report["regulatory_documents"],
+        "validation_categories": report.get("validation_categories", []),
         "created_at": report["created_at"]
     }
 
@@ -1031,6 +1032,38 @@ def download_validation_report(doc_id: str, user: dict = Depends(get_current_use
         content=docx_bytes,
         media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
         headers={"Content-Disposition": f"attachment; filename=validation_report_{doc_id}.docx"}
+    )
+
+
+@app.get("/validate/{doc_id}/report/{report_id}/download")
+def download_specific_validation_report(doc_id: str, report_id: str, user: dict = Depends(get_current_user)):
+    """Скачати конкретний звіт валідації за ID у DOCX форматі"""
+    # Перевіряємо доступ до документа
+    verify_document_access(doc_id, user)
+
+    # Отримуємо конкретний звіт за ID
+    user_supabase = get_user_supabase(user["access_token"])
+    result = user_supabase.table("validation_reports").select("*").eq(
+        "id", report_id
+    ).eq("user_document_id", doc_id).execute()
+
+    if not result.data:
+        raise HTTPException(status_code=404, detail="Звіт валідації не знайдено")
+
+    report = result.data[0]
+    validation_result = report["validation_result"]
+
+    # Отримуємо ім'я документа
+    doc_result = user_supabase.table("documents").select("filename").eq("id", doc_id).execute()
+    document_name = doc_result.data[0]["filename"] if doc_result.data else "Документ"
+
+    # Генеруємо DOCX
+    docx_bytes = export_validation_to_docx(validation_result, document_name)
+
+    return Response(
+        content=docx_bytes,
+        media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        headers={"Content-Disposition": f"attachment; filename=validation_report_{report_id}.docx"}
     )
 
 
