@@ -5,8 +5,33 @@
 
 import re
 import json
+import time
 from typing import List, Dict, Optional
 from config import groq_client
+from groq import APIStatusError
+
+
+def chunk_text(text: str, max_chars: int = 4000) -> List[str]:
+    """Розбиває текст на частини для обробки"""
+    chunks = []
+    words = text.split()
+    current_chunk = []
+    current_length = 0
+
+    for word in words:
+        word_length = len(word) + 1
+        if current_length + word_length > max_chars and current_chunk:
+            chunks.append(' '.join(current_chunk))
+            current_chunk = [word]
+            current_length = word_length
+        else:
+            current_chunk.append(word)
+            current_length += word_length
+
+    if current_chunk:
+        chunks.append(' '.join(current_chunk))
+
+    return chunks
 
 
 def extract_formatting_rules_structured(
@@ -23,96 +48,67 @@ def extract_formatting_rules_structured(
         Список структурованих правил з параметрами
     """
 
-    prompt = f"""Ти — експерт з технічних стандартів оформлення документів (ДСТУ, стандарти).
+    # Скорочений промпт для економії токенів
+    prompt = f"""Витягни правила форматування з документа "{document_name}" у JSON:
 
-Витягни СТРУКТУРОВАНІ правила оформлення з цього фрагменту.
+[{{"parameter_type": "font|margins|spacing|indent|page_size|alignment",
+   "description": "опис",
+   "values": {{"font_name": "Times New Roman", "font_size": 14, "unit": "pt"}},
+   "section": "розділ"}}]
 
-ВАЖЛИВО: Для КОЖНОГО правила витягуй ТОЧНІ ЧИСЛОВІ ПАРАМЕТРИ!
+Типи values:
+- font: font_name, font_size, unit
+- margins: top, bottom, left, right, unit (cm)
+- spacing: line_spacing, spacing_type
+- indent: first_line, unit (cm)
+- page_size: width, height, unit, standard
+- alignment: alignment (justify|left|center|right)
 
-Формат відповіді (JSON масив):
-[
-  {{
-    "parameter_type": "font|margins|spacing|indent|page_size|alignment",
-    "description": "Опис правила",
-    "values": {{
-      // Для font:
-      "font_name": "Times New Roman",
-      "font_size": 14,
-      "unit": "pt"
-    }},
-    "section": "Розділ документа"
-  }},
-  {{
-    "parameter_type": "margins",
-    "description": "Поля сторінки",
-    "values": {{
-      "top": 2.0,
-      "bottom": 2.0,
-      "left": 3.0,
-      "right": 1.5,
-      "unit": "cm"
-    }},
-    "section": "Розділ 3.2"
-  }},
-  {{
-    "parameter_type": "spacing",
-    "description": "Міжрядковий інтервал",
-    "values": {{
-      "line_spacing": 1.5,
-      "spacing_type": "multiple"
-    }},
-    "section": "Розділ 3.3"
-  }},
-  {{
-    "parameter_type": "indent",
-    "description": "Абзацний відступ",
-    "values": {{
-      "first_line": 1.25,
-      "unit": "cm"
-    }},
-    "section": "Розділ 3.4"
-  }},
-  {{
-    "parameter_type": "page_size",
-    "description": "Розмір сторінки",
-    "values": {{
-      "width": 21.0,
-      "height": 29.7,
-      "unit": "cm",
-      "standard": "A4"
-    }},
-    "section": "Розділ 3.1"
-  }},
-  {{
-    "parameter_type": "alignment",
-    "description": "Вирівнювання тексту",
-    "values": {{
-      "alignment": "justify"  // left|center|right|justify
-    }},
-    "section": "Розділ 3.5"
-  }}
-]
+ТЕКСТ:
+{text[:4000]}
 
-ТЕКСТ НОРМАТИВНОГО ДОКУМЕНТА "{document_name}":
-{text[:12000]}
-
-ВАЖЛИВО: Відповідай ТІЛЬКИ валідним JSON масивом! Без додаткового тексту!
-Якщо правил багато - витягни найважливіші (шрифт, поля, інтервали, відступи)."""
+Відповідай ТІЛЬКИ JSON масивом з найважливішими правилами."""
 
     try:
-        response = groq_client.chat.completions.create(
-            model="llama-3.1-8b-instant",
-            messages=[
-                {
-                    "role": "system",
-                    "content": "Ти експерт з витягування структурованих правил форматування. "
-                               "Відповідай ТІЛЬКИ валідним JSON з точними числовими параметрами."
-                },
-                {"role": "user", "content": prompt}
-            ],
-            temperature=0.1,
-            max_tokens=8000  # Збільшено для великих документів
-        )
+        # Retry механізм для rate limiting
+        max_retries = 3
+        retry_delay = 15  # секунди
+        response = None
+
+        for attempt in range(max_retries):
+            try:
+                response = groq_client.chat.completions.create(
+                    model="llama-3.1-8b-instant",
+                    messages=[
+                        {
+                            "role": "system",
+                            "content": "Ти експерт з витягування структурованих правил форматування. "
+                                       "Відповідай ТІЛЬКИ валідним JSON з точними числовими параметрами."
+                        },
+                        {"role": "user", "content": prompt}
+                    ],
+                    temperature=0.1,
+                    max_tokens=3000  # Зменшено для уникнення rate limit
+                )
+                break  # Успішно - виходимо з циклу
+
+            except APIStatusError as e:
+                # Перевіряємо чи це rate limit помилка
+                if e.status_code == 413 or 'rate_limit' in str(e).lower():
+                    if attempt < max_retries - 1:
+                        wait_time = retry_delay * (attempt + 1)
+                        print(f"⏳ Rate limit досягнуто. Очікування {wait_time} секунд... (спроба {attempt + 1}/{max_retries})")
+                        time.sleep(wait_time)
+                    else:
+                        print(f"❌ Досягнуто максимум спроб. Rate limit все ще активний.")
+                        raise
+                else:
+                    # Інша помилка - пробрасываємо далі
+                    raise
+
+        if not response:
+            print(f"❌ Не вдалося отримати відповідь від API")
+            return []
 
         content = response.choices[0].message.content
         print(f"🔍 RAW відповідь LLM ({len(content) if content else 0} символів):")

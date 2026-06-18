@@ -97,7 +97,9 @@ function ValidationReportView({ report, colors, validationCategories, timestamp 
                         fontWeight: '700',
                         margin: 0,
                         color: colors.text
-                    }}>Звіт валідації документа</h2>
+                    }}>
+                        {report.test_details ? 'Звіт перевірки тесту' : 'Звіт валідації документа'}
+                    </h2>
                     <div style={{
                         fontSize: '14px',
                         fontWeight: '600',
@@ -163,33 +165,170 @@ function ValidationReportView({ report, colors, validationCategories, timestamp 
                 </div>
             )}
 
-            {/* Score */}
-            <div style={{
-                background: colors.inputBg,
-                borderRadius: '10px',
-                padding: '16px',
-                marginBottom: '20px',
-                display: 'flex',
-                justifyContent: 'space-between',
-                alignItems: 'center'
-            }}>
-                <div>
-                    <div style={{ fontSize: '12px', color: colors.muted, marginBottom: '4px' }}>
-                        Оцінка відповідності
+            {/* Test Results Section (if this is a test check) */}
+            {report.test_details && (
+                <div style={{
+                    background: colors.inputBg,
+                    borderRadius: '10px',
+                    padding: '20px',
+                    marginBottom: '20px',
+                    border: `2px solid ${colors.accent}`
+                }}>
+                    <h3 style={{
+                        fontSize: '16px',
+                        fontWeight: '700',
+                        marginBottom: '16px',
+                        color: colors.text,
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: '8px'
+                    }}>
+                        <ClipboardList size={20} />
+                        Результати тестування
+                    </h3>
+
+                    {/* Grade Display */}
+                    {report.grade && (
+                        <div style={{
+                            background: colors.surface,
+                            borderRadius: '8px',
+                            padding: '16px',
+                            marginBottom: '16px',
+                            textAlign: 'center'
+                        }}>
+                            <div style={{
+                                fontSize: '48px',
+                                fontWeight: '700',
+                                color: report.grade.numeric >= 60 ? complianceColors.pass : complianceColors.fail,
+                                marginBottom: '8px'
+                            }}>
+                                {report.grade.numeric}
+                            </div>
+                            <div style={{
+                                fontSize: '16px',
+                                fontWeight: '600',
+                                color: colors.accent,
+                                marginBottom: '4px'
+                            }}>
+                                Оцінка ECTS: {report.grade.ects}
+                            </div>
+                            <div style={{
+                                fontSize: '13px',
+                                color: colors.muted
+                            }}>
+                                {report.grade.text}
+                            </div>
+                        </div>
+                    )}
+
+                    {/* Test Statistics */}
+                    <div style={{
+                        display: 'grid',
+                        gridTemplateColumns: 'repeat(2, 1fr)',
+                        gap: '12px'
+                    }}>
+                        <div style={{
+                            background: colors.surface,
+                            borderRadius: '8px',
+                            padding: '14px',
+                            textAlign: 'center'
+                        }}>
+                            <div style={{ fontSize: '12px', color: colors.muted, marginBottom: '6px' }}>
+                                Всього питань
+                            </div>
+                            <div style={{ fontSize: '28px', fontWeight: '700', color: colors.text }}>
+                                {report.test_details.total_questions}
+                            </div>
+                        </div>
+
+                        <div style={{
+                            background: colors.surface,
+                            borderRadius: '8px',
+                            padding: '14px',
+                            textAlign: 'center'
+                        }}>
+                            <div style={{ fontSize: '12px', color: colors.muted, marginBottom: '6px' }}>
+                                Правильних відповідей
+                            </div>
+                            <div style={{ fontSize: '28px', fontWeight: '700', color: complianceColors.pass }}>
+                                {report.test_details.correct_answers}
+                            </div>
+                        </div>
+
+                        <div style={{
+                            background: colors.surface,
+                            borderRadius: '8px',
+                            padding: '14px',
+                            textAlign: 'center'
+                        }}>
+                            <div style={{ fontSize: '12px', color: colors.muted, marginBottom: '6px' }}>
+                                Неправильних відповідей
+                            </div>
+                            <div style={{ fontSize: '28px', fontWeight: '700', color: complianceColors.fail }}>
+                                {report.test_details.incorrect_answers}
+                            </div>
+                        </div>
+
+                        <div style={{
+                            background: colors.surface,
+                            borderRadius: '8px',
+                            padding: '14px',
+                            textAlign: 'center'
+                        }}>
+                            <div style={{ fontSize: '12px', color: colors.muted, marginBottom: '6px' }}>
+                                Процент
+                            </div>
+                            <div style={{ fontSize: '28px', fontWeight: '700', color: colors.accent }}>
+                                {report.test_details.percentage.toFixed(1)}%
+                            </div>
+                        </div>
                     </div>
-                    <div style={{ fontSize: '24px', fontWeight: '700', color: colors.accent }}>
-                        {(report.compliance_score * 100).toFixed(1)}%
+
+                    {report.test_details.unanswered > 0 && (
+                        <div style={{
+                            marginTop: '12px',
+                            padding: '10px',
+                            background: colors.surface,
+                            borderRadius: '8px',
+                            fontSize: '12px',
+                            color: colors.muted,
+                            textAlign: 'center'
+                        }}>
+                            Без відповіді: {report.test_details.unanswered}
+                        </div>
+                    )}
+                </div>
+            )}
+
+            {/* Score (for regular validation reports) */}
+            {!report.test_details && (
+                <div style={{
+                    background: colors.inputBg,
+                    borderRadius: '10px',
+                    padding: '16px',
+                    marginBottom: '20px',
+                    display: 'flex',
+                    justifyContent: 'space-between',
+                    alignItems: 'center'
+                }}>
+                    <div>
+                        <div style={{ fontSize: '12px', color: colors.muted, marginBottom: '4px' }}>
+                            Оцінка відповідності
+                        </div>
+                        <div style={{ fontSize: '24px', fontWeight: '700', color: colors.accent }}>
+                            {(report.compliance_score * 100).toFixed(1)}%
+                        </div>
+                    </div>
+                    <div style={{ textAlign: 'right' }}>
+                        <div style={{ fontSize: '12px', color: colors.muted, marginBottom: '4px' }}>
+                            Всього проблем
+                        </div>
+                        <div style={{ fontSize: '24px', fontWeight: '700', color: colors.text }}>
+                            {report.summary.total_issues}
+                        </div>
                     </div>
                 </div>
-                <div style={{ textAlign: 'right' }}>
-                    <div style={{ fontSize: '12px', color: colors.muted, marginBottom: '4px' }}>
-                        Всього проблем
-                    </div>
-                    <div style={{ fontSize: '24px', fontWeight: '700', color: colors.text }}>
-                        {report.summary.total_issues}
-                    </div>
-                </div>
-            </div>
+            )}
 
             {/* Summary */}
             {report.summary.total_issues > 0 && (
@@ -396,7 +535,9 @@ export default function Home() {
     const [showActionsPopup, setShowActionsPopup] = useState(false)
     const [showRegulatoryDialog, setShowRegulatoryDialog] = useState(false)
     const [showValidationDialog, setShowValidationDialog] = useState(false)
+    const [showTestCheckDialog, setShowTestCheckDialog] = useState(false)
     const [regulatoryDocs, setRegulatoryDocs] = useState([])
+    const [testAnswerKeys, setTestAnswerKeys] = useState([])
     const [pendingRegulatoryFile, setPendingRegulatoryFile] = useState(null)
     const fileRef = useRef(null)
     const bottomRef = useRef(null)
@@ -485,6 +626,20 @@ export default function Home() {
         loadRegulatoryDocs()
     }, [])
 
+    // Завантажуємо еталони тестів при старті
+    useEffect(() => {
+        async function loadTestAnswerKeys() {
+            try {
+                const res = await API.get('/tests/answer-keys')
+                setTestAnswerKeys(res.data?.answer_keys || [])
+                console.log(`Завантажено ${res.data?.answer_keys?.length || 0} еталонів тестів`)
+            } catch (err) {
+                console.error('Помилка завантаження еталонів тестів:', err)
+            }
+        }
+        loadTestAnswerKeys()
+    }, [])
+
     async function handleFileUpload(file, isRegulatory, category = null, tags = null) {
         if (!file) return
         setUploading(true)
@@ -528,19 +683,75 @@ export default function Home() {
         }
     }
 
-    function handleFileSelect(isRegulatory) {
+    async function handleTestAnswerKeyUpload(file) {
+        if (!file) return
+        setUploading(true)
+
+        addMessage('user', `Завантаження еталону тесту: ${file.name}`)
+
+        const formData = new FormData()
+        formData.append('file', file)
+
+        try {
+            // 1. Завантажуємо файл
+            const uploadRes = await API.post('/upload', formData)
+            const docId = uploadRes.data.id
+
+            addMessage('assistant', `Парсинг тесту...`)
+
+            // 2. Парсимо як еталон тесту
+            const parseRes = await API.post(`/tests/parse-answer-key/${docId}`)
+
+            if (parseRes.data.success) {
+                const { total_questions, warnings, answer_key_id } = parseRes.data
+
+                // Оновлюємо список еталонів
+                const updatedKeys = await API.get('/tests/answer-keys')
+                setTestAnswerKeys(updatedKeys.data?.answer_keys || [])
+
+                let msg = `✅ Еталон тесту успішно створено!\n📊 Розпізнано питань: ${total_questions}`
+                if (warnings && warnings.length > 0) {
+                    msg += `\n⚠️ Попередження:\n${warnings.map(w => `- ${w}`).join('\n')}`
+                }
+
+                addMessage('assistant', msg)
+                showToast(`Еталон "${file.name}" створено! (${total_questions} питань)`, 'success')
+                refreshDocumentsList()
+            } else {
+                const errors = parseRes.data.errors || []
+                let errorMsg = '❌ Не вдалося розпарсити тест:\n'
+                errorMsg += errors.map(e => `- ${e}`).join('\n')
+                addMessage('assistant', errorMsg)
+                showToast('Помилка парсингу тесту', 'error')
+            }
+        } catch (err) {
+            const errorMsg = err.response?.data?.detail || 'Помилка завантаження тесту'
+            addMessage('assistant', `❌ ${errorMsg}`)
+            showToast(errorMsg, 'error')
+        } finally {
+            setUploading(false)
+        }
+    }
+
+    function handleFileSelect(type = 'normal') {
+        // type: 'normal' | 'regulatory' | 'test'
         const input = document.createElement('input')
         input.type = 'file'
         input.accept = '.pdf,.docx'
-        input.onchange = (e) => {
+        input.onchange = async (e) => {
             const file = e.target.files[0]
             if (file) {
-                if (isRegulatory) {
+                if (type === 'regulatory') {
                     // Для нормативних документів показуємо діалог вибору категорії
                     setPendingRegulatoryFile(file)
                     setShowRegulatoryDialog(true)
                     setShowUploadMenu(false)
+                } else if (type === 'test') {
+                    // Для тестів - завантажуємо і парсимо як еталон
+                    setShowUploadMenu(false)
+                    await handleTestAnswerKeyUpload(file)
                 } else {
+                    // Звичайний документ
                     handleFileUpload(file, false)
                 }
             }
@@ -1025,6 +1236,174 @@ export default function Home() {
         )
     }
 
+    // Діалог вибору еталону тесту для перевірки
+    const TestCheckDialog = () => {
+        const [selectedAnswerKey, setSelectedAnswerKey] = useState(null)
+
+        const handleCheckTest = async () => {
+            if (!selectedAnswerKey) return
+
+            setShowTestCheckDialog(false)
+            setLoading(true)
+            addMessage('assistant', 'Перевіряю тест...')
+
+            try {
+                const res = await API.post('/tests/check', {
+                    answer_key_id: selectedAnswerKey.id,
+                    student_doc_id: currentDoc.id
+                })
+
+                const result = res.data
+                const testDetails = result.test_details || {}
+                const grade = result.grade || {}
+
+                // Форматуємо повідомлення з результатами
+                let message = `📊 Результати перевірки тесту:\n\n`
+                message += `✅ Правильних відповідей: ${testDetails.correct_answers}/${testDetails.total_questions}\n`
+                message += `❌ Неправильних: ${testDetails.incorrect_answers}\n`
+                message += `⚠️ Без відповіді: ${testDetails.unanswered || 0}\n`
+                message += `📈 Відсоток: ${testDetails.percentage}%\n\n`
+                message += `🎯 Оцінка: ${grade.numeric} (${grade.text}, ECTS: ${grade.ects})`
+
+                addMessage('assistant', message, {
+                    validation: result,
+                    timestamp: new Date().toISOString()
+                })
+
+                // Додаємо звіт в previews для показу в правій панелі
+                setPreviews(prev => {
+                    const updated = [...prev, {
+                        content: result,
+                        materialType: 'test_validation',
+                        docId: currentDoc.id,
+                        isValidation: true,
+                        isTestCheck: true,
+                        timestamp: new Date().toLocaleString('uk-UA'),
+                        reportId: result.report_id
+                    }]
+                    setPreviewIndex(updated.length - 1)
+                    return updated
+                })
+
+                showToast(`Тест перевірено! Оцінка: ${grade.numeric} (${testDetails.percentage}%)`, 'success')
+                setSidebarOpen(true)
+            } catch (err) {
+                const errorMsg = err.response?.data?.detail || 'Помилка перевірки тесту'
+                addMessage('assistant', `❌ ${errorMsg}`)
+                showToast(errorMsg, 'error')
+            } finally {
+                setLoading(false)
+            }
+        }
+
+        return (
+            <div style={{
+                position: 'fixed', top: 0, left: 0, right: 0, bottom: 0,
+                background: 'rgba(0,0,0,0.7)', zIndex: 3000,
+                display: 'flex', alignItems: 'center', justifyContent: 'center',
+                padding: '20px'
+            }}
+                 onClick={() => setShowTestCheckDialog(false)}
+            >
+                <div
+                    onClick={(e) => e.stopPropagation()}
+                    style={{
+                        background: COLORS.surface,
+                        border: `1px solid ${COLORS.border}`,
+                        borderRadius: '16px',
+                        padding: '24px',
+                        maxWidth: '500px',
+                        width: '100%',
+                        boxShadow: '0 8px 32px rgba(0,0,0,0.5)'
+                    }}
+                >
+                    <h3 style={{ fontSize: '16px', fontWeight: '600', color: COLORS.text, marginBottom: '8px' }}>
+                        Вибір еталону тесту
+                    </h3>
+                    <p style={{ fontSize: '13px', color: COLORS.muted, marginBottom: '20px' }}>
+                        Оберіть еталон з правильними відповідями для порівняння
+                    </p>
+
+                    {testAnswerKeys.length === 0 ? (
+                        <p style={{ fontSize: '13px', color: COLORS.muted, textAlign: 'center', padding: '20px' }}>
+                            Немає еталонів тестів. Спочатку завантажте еталон через меню завантаження.
+                        </p>
+                    ) : (
+                        <div style={{ marginBottom: '20px', maxHeight: '300px', overflowY: 'auto' }}>
+                            {testAnswerKeys.map(key => (
+                                <label
+                                    key={key.id}
+                                    style={{
+                                        display: 'flex',
+                                        alignItems: 'flex-start',
+                                        gap: '12px',
+                                        padding: '12px',
+                                        background: selectedAnswerKey?.id === key.id ? COLORS.accentLight : 'transparent',
+                                        border: `1px solid ${selectedAnswerKey?.id === key.id ? COLORS.accent : COLORS.border}`,
+                                        borderRadius: '10px',
+                                        marginBottom: '8px',
+                                        cursor: 'pointer',
+                                        transition: 'all 0.2s'
+                                    }}
+                                    onClick={() => setSelectedAnswerKey(key)}
+                                >
+                                    <input
+                                        type="radio"
+                                        checked={selectedAnswerKey?.id === key.id}
+                                        onChange={() => setSelectedAnswerKey(key)}
+                                        style={{ marginTop: '2px' }}
+                                    />
+                                    <div style={{ flex: 1 }}>
+                                        <div style={{ fontSize: '14px', fontWeight: '600', color: COLORS.text, marginBottom: '4px' }}>
+                                            {key.test_name}
+                                        </div>
+                                        <div style={{ fontSize: '12px', color: COLORS.muted }}>
+                                            Питань: {key.total_questions} • {new Date(key.created_at).toLocaleDateString('uk-UA')}
+                                        </div>
+                                    </div>
+                                </label>
+                            ))}
+                        </div>
+                    )}
+
+                    <div style={{ display: 'flex', gap: '10px', justifyContent: 'flex-end' }}>
+                        <button
+                            onClick={() => setShowTestCheckDialog(false)}
+                            style={{
+                                padding: '10px 20px',
+                                background: 'transparent',
+                                border: `1px solid ${COLORS.border}`,
+                                borderRadius: '8px',
+                                color: COLORS.text,
+                                fontSize: '13px',
+                                cursor: 'pointer'
+                            }}
+                        >
+                            Скасувати
+                        </button>
+                        <button
+                            onClick={handleCheckTest}
+                            disabled={!selectedAnswerKey}
+                            style={{
+                                padding: '10px 20px',
+                                background: selectedAnswerKey ? COLORS.accent : COLORS.border,
+                                border: 'none',
+                                borderRadius: '8px',
+                                color: '#fff',
+                                fontSize: '13px',
+                                cursor: selectedAnswerKey ? 'pointer' : 'not-allowed',
+                                fontWeight: '600',
+                                opacity: selectedAnswerKey ? 1 : 0.5
+                            }}
+                        >
+                            Перевірити тест
+                        </button>
+                    </div>
+                </div>
+            </div>
+        )
+    }
+
     function handleDocumentSelect(doc) {
         setCurrentDoc(doc)
 
@@ -1376,7 +1755,7 @@ export default function Home() {
                                     overflow: 'hidden'
                                 }}>
                                     <button
-                                        onClick={() => handleFileSelect(true)}
+                                        onClick={() => handleFileSelect('regulatory')}
                                         style={{
                                             width: '100%',
                                             padding: '12px 16px',
@@ -1399,7 +1778,30 @@ export default function Home() {
                                         <span>Додати нормативний документ</span>
                                     </button>
                                     <button
-                                        onClick={() => handleFileSelect(false)}
+                                        onClick={() => handleFileSelect('normal')}
+                                        style={{
+                                            width: '100%',
+                                            padding: '12px 16px',
+                                            background: 'transparent',
+                                            border: 'none',
+                                            borderBottom: `1px solid ${COLORS.border}`,
+                                            color: COLORS.text,
+                                            fontSize: '13px',
+                                            textAlign: 'left',
+                                            cursor: 'pointer',
+                                            display: 'flex',
+                                            alignItems: 'center',
+                                            gap: '10px',
+                                            transition: 'background 0.2s'
+                                        }}
+                                        onMouseEnter={(e) => e.target.style.background = COLORS.accentLight}
+                                        onMouseLeave={(e) => e.target.style.background = 'transparent'}
+                                    >
+                                        <FileText size={16} />
+                                        <span>Додати документ для опрацювання</span>
+                                    </button>
+                                    <button
+                                        onClick={() => handleFileSelect('test')}
                                         style={{
                                             width: '100%',
                                             padding: '12px 16px',
@@ -1417,8 +1819,8 @@ export default function Home() {
                                         onMouseEnter={(e) => e.target.style.background = COLORS.accentLight}
                                         onMouseLeave={(e) => e.target.style.background = 'transparent'}
                                     >
-                                        <FileText size={16} />
-                                        <span>Додати документ для опрацювання</span>
+                                        <FileCheck size={16} />
+                                        <span>Відповіді на тестові питання (еталон)</span>
                                     </button>
                                 </div>
                             )}
@@ -1699,7 +2101,8 @@ export default function Home() {
                             { type: 'quiz', label: 'Тест' },
                             { type: 'flashcards', label: 'Флеш-картки' },
                             { type: 'glossary', label: 'Глосарій' },
-                            { type: 'validate', label: 'Валідувати документ' }
+                            { type: 'validate', label: 'Валідувати документ' },
+                            { type: 'test_check', label: 'Перевірити тестування' }
                         ].map((action, idx) => (
                             <button
                                 key={action.type}
@@ -1714,6 +2117,12 @@ export default function Home() {
                                             return
                                         }
                                         setShowValidationDialog(true)
+                                    } else if (action.type === 'test_check') {
+                                        if (testAnswerKeys.length === 0) {
+                                            showToast('Спочатку завантажте хоча б один еталон тесту!', 'warning')
+                                            return
+                                        }
+                                        setShowTestCheckDialog(true)
                                     } else {
                                         setLoading(true)
                                         addMessage('assistant', `Генерую ${action.label.toLowerCase()}...`)
@@ -1744,7 +2153,8 @@ export default function Home() {
                                         }
                                     }
                                 }}
-                                disabled={action.type === 'validate' && regulatoryDocs.length === 0}
+                                disabled={(action.type === 'validate' && regulatoryDocs.length === 0) ||
+                                         (action.type === 'test_check' && testAnswerKeys.length === 0)}
                                 style={{
                                     padding: '12px 16px',
                                     background: 'transparent',
@@ -1752,7 +2162,8 @@ export default function Home() {
                                     borderLeft: 'none',
                                     borderRight: 'none',
                                     borderBottom: 'none',
-                                    cursor: action.type === 'validate' && regulatoryDocs.length === 0
+                                    cursor: ((action.type === 'validate' && regulatoryDocs.length === 0) ||
+                                            (action.type === 'test_check' && testAnswerKeys.length === 0))
                                         ? 'not-allowed'
                                         : 'pointer',
                                     fontSize: '14px',
@@ -1760,10 +2171,12 @@ export default function Home() {
                                     color: COLORS.text,
                                     textAlign: 'left',
                                     transition: 'background 0.2s',
-                                    opacity: action.type === 'validate' && regulatoryDocs.length === 0 ? 0.5 : 1
+                                    opacity: ((action.type === 'validate' && regulatoryDocs.length === 0) ||
+                                             (action.type === 'test_check' && testAnswerKeys.length === 0)) ? 0.5 : 1
                                 }}
                                 onMouseEnter={(e) => {
-                                    if (!(action.type === 'validate' && regulatoryDocs.length === 0)) {
+                                    if (!((action.type === 'validate' && regulatoryDocs.length === 0) ||
+                                          (action.type === 'test_check' && testAnswerKeys.length === 0))) {
                                         e.currentTarget.style.background = COLORS.inputBg
                                     }
                                 }}
@@ -1777,6 +2190,11 @@ export default function Home() {
                                         (потрібні нормативи)
                                     </span>
                                 )}
+                                {action.type === 'test_check' && testAnswerKeys.length === 0 && (
+                                    <span style={{ fontSize: '11px', color: COLORS.muted, marginLeft: '8px' }}>
+                                        (потрібні еталони тестів)
+                                    </span>
+                                )}
                             </button>
                         ))}
                     </div>
@@ -1786,6 +2204,7 @@ export default function Home() {
             {/* Діалоги */}
             {showRegulatoryDialog && <RegulatoryDialog />}
             {showValidationDialog && <ValidationDialog />}
+            {showTestCheckDialog && <TestCheckDialog />}
 
             <style>{`
                 @keyframes spin {

@@ -13,6 +13,8 @@ from validator import validate_document
 from validation_report import format_report_for_api, format_report_for_chat
 from auth import get_current_user, get_optional_user
 from auth_routes import router as auth_router
+from test_parser import parse_test_document, extract_student_answers, validate_test_structure
+from test_checker import compare_test_answers, generate_test_report_text, calculate_grade
 
 
 def calculate_file_hash(content: bytes) -> str:
@@ -192,8 +194,22 @@ def delete_document(doc_id: str, user: dict = Depends(get_current_user)):
             except Exception as e:
                 print(f"⚠️ Помилка видалення з Storage: {e}")
 
-        # 3. Видаляємо з БД (це також видалить materials та validation_reports через CASCADE)
-        print(f"🗑️ [3/3] Видалення з БД...")
+        # 3. Видаляємо з БД
+        print(f"🗑️ [3/5] Видалення validation reports...")
+        try:
+            supabase_admin.table("validation_reports").delete().eq("user_document_id", doc_id).execute()
+            print(f"✅ Видалено пов'язані звіти валідації")
+        except Exception as e:
+            print(f"⚠️ Помилка видалення validation reports: {e}")
+
+        print(f"🗑️ [4/5] Видалення test_answer_keys...")
+        try:
+            supabase_admin.table("test_answer_keys").delete().eq("document_id", doc_id).execute()
+            print(f"✅ Видалено пов'язані еталони тестів")
+        except Exception as e:
+            print(f"⚠️ Помилка видалення test_answer_keys: {e}")
+
+        print(f"🗑️ [5/5] Видалення документа з БД...")
         supabase_admin.table("documents").delete().eq("id", doc_id).execute()
         print(f"✅ Документ видалено")
 
@@ -1114,6 +1130,236 @@ def chat_validation(doc_id: str, body: dict, user: dict = Depends(get_current_us
     # За замовчуванням повертаємо форматований звіт
     formatted_report = format_report_for_chat(validation_result)
     return {"answer": formatted_report}
+
+
+# ============================================================================
+# ENDPOINTS ДЛЯ РОБОТИ З ТЕСТАМИ
+# ============================================================================
+
+@app.post("/tests/parse-answer-key/{doc_id}")
+def parse_answer_key(doc_id: str, user: dict = Depends(get_current_user)):
+    """Парсить документ як еталон тесту (з правильними відповідями)
+
+    Витягує питання, варіанти відповідей та позначки правильних відповідей.
+    Зберігає структуру тесту для подальшої перевірки відповідей студентів.
+    """
+    # Перевіряємо доступ до документа
+    doc = verify_document_access(doc_id, user)
+
+    try:
+        # Отримуємо текст документа
+        print(f"📖 Парсинг еталону тесту: {doc['filename']}")
+
+        # Отримуємо файл з Storage
+        storage_url = doc.get("storage_url")
+        if not storage_url:
+            raise HTTPException(status_code=400, detail="Файл не знайдено в storage")
+
+        # Завантажуємо файл з Storage
+        file_bytes = supabase.storage.from_("documents").download(storage_url)
+
+        # Витягуємо текст з файлу
+        from document_parser import extract_text
+        full_text = extract_text(file_bytes, doc['filename'])
+
+        # Парсимо тест
+        questions = parse_test_document(full_text)
+
+        if not questions:
+            raise HTTPException(status_code=400, detail="Не вдалося розпарсити тест. Перевірте формат документа.")
+
+        # Валідуємо структуру
+        validation = validate_test_structure(questions)
+
+        if not validation["valid"]:
+            return {
+                "success": False,
+                "errors": validation["errors"],
+                "warnings": validation["warnings"],
+                "questions": questions
+            }
+
+        # Зберігаємо розпарсений тест в таблиці test_answer_keys
+        answer_key_data = {
+            "document_id": doc_id,
+            "user_id": user["user_id"],
+            "test_name": doc["filename"],
+            "questions": questions,
+            "total_questions": len(questions),
+            "validation_warnings": validation["warnings"]
+        }
+
+        # Створюємо або оновлюємо запис
+        existing = supabase_admin.table("test_answer_keys").select("id").eq(
+            "document_id", doc_id
+        ).execute()
+
+        if existing.data:
+            # Оновлюємо існуючий
+            result = supabase_admin.table("test_answer_keys").update(
+                answer_key_data
+            ).eq("document_id", doc_id).execute()
+        else:
+            # Створюємо новий
+            result = supabase_admin.table("test_answer_keys").insert(
+                answer_key_data
+            ).execute()
+
+        # Оновлюємо тип документа
+        supabase_admin.table("documents").update({
+            "document_type": "test_answer_key"
+        }).eq("id", doc_id).execute()
+
+        print(f"✅ Еталон тесту збережено: {len(questions)} питань")
+
+        return {
+            "success": True,
+            "answer_key_id": result.data[0]["id"],
+            "total_questions": len(questions),
+            "questions": questions,
+            "warnings": validation["warnings"]
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        import traceback
+        print(f"❌ Помилка парсингу тесту: {e}")
+        print(f"🔍 Traceback: {traceback.format_exc()}")
+        raise HTTPException(status_code=500, detail=f"Помилка парсингу тесту: {str(e)}")
+
+
+@app.post("/tests/check")
+def check_student_test(
+    body: dict,
+    user: dict = Depends(get_current_user)
+):
+    """Перевіряє відповіді студента проти еталону
+
+    Body:
+        answer_key_id: ID еталону тесту
+        student_doc_id: ID документа з відповідями студента
+    """
+    answer_key_id = body.get("answer_key_id")
+    student_doc_id = body.get("student_doc_id")
+
+    if not answer_key_id or not student_doc_id:
+        raise HTTPException(status_code=400, detail="Потрібно вказати answer_key_id та student_doc_id")
+
+    try:
+        # Отримуємо еталон
+        answer_key_result = supabase_admin.table("test_answer_keys").select("*").eq(
+            "id", answer_key_id
+        ).execute()
+
+        if not answer_key_result.data:
+            raise HTTPException(status_code=404, detail="Еталон тесту не знайдено")
+
+        answer_key = answer_key_result.data[0]
+        questions = answer_key["questions"]
+
+        # Перевіряємо доступ до документа студента
+        student_doc = verify_document_access(student_doc_id, user)
+
+        # Отримуємо файл студента з Storage
+        storage_url = student_doc.get("storage_url")
+        if not storage_url:
+            raise HTTPException(status_code=400, detail="Файл студента не знайдено в storage")
+
+        # Завантажуємо файл з Storage
+        file_bytes = supabase.storage.from_("documents").download(storage_url)
+
+        # Витягуємо текст
+        from document_parser import extract_text
+        student_text = extract_text(file_bytes, student_doc['filename'])
+
+        # Витягуємо відповіді студента
+        student_answers = extract_student_answers(student_text, questions)
+
+        if not student_answers:
+            raise HTTPException(
+                status_code=400,
+                detail="Не вдалося знайти відповіді в документі студента. Перевірте формат."
+            )
+
+        # Порівнюємо відповіді
+        validation_result = compare_test_answers(
+            student_answers,
+            questions,
+            student_doc_name=student_doc["filename"],
+            answer_key_name=answer_key["test_name"]
+        )
+
+        # Додаємо оцінку
+        grade = calculate_grade(validation_result["test_details"]["percentage"])
+        validation_result["grade"] = grade
+
+        # Зберігаємо результат в validation_reports
+        report = supabase_admin.table("validation_reports").insert({
+            "user_document_id": student_doc_id,
+            "regulatory_documents": [{
+                "id": answer_key_id,
+                "filename": answer_key["test_name"],
+                "type": "test_answer_key"
+            }],
+            "validation_result": validation_result,
+            "status": "completed",
+            "user_id": user["user_id"]
+        }).execute()
+
+        validation_result["report_id"] = report.data[0]["id"]
+
+        # Оновлюємо тип документа студента
+        supabase_admin.table("documents").update({
+            "document_type": "student_test"
+        }).eq("id", student_doc_id).execute()
+
+        print(f"✅ Перевірка тесту завершена: {validation_result['test_details']['percentage']:.1f}%")
+
+        return format_report_for_api(validation_result)
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        import traceback
+        print(f"❌ Помилка перевірки тесту: {e}")
+        print(f"🔍 Traceback: {traceback.format_exc()}")
+        raise HTTPException(status_code=500, detail=f"Помилка перевірки тесту: {str(e)}")
+
+
+@app.get("/tests/answer-keys")
+def list_answer_keys(user: dict = Depends(get_current_user)):
+    """Отримати список всіх еталонів тестів користувача"""
+    try:
+        result = supabase_admin.table("test_answer_keys").select(
+            "id, test_name, total_questions, created_at, document_id"
+        ).eq("user_id", user["user_id"]).order("created_at", desc=True).execute()
+
+        return {"answer_keys": result.data}
+
+    except Exception as e:
+        print(f"❌ Помилка отримання списку еталонів: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/tests/answer-keys/{answer_key_id}")
+def get_answer_key_details(answer_key_id: str, user: dict = Depends(get_current_user)):
+    """Отримати детальну інформацію про еталон тесту"""
+    try:
+        result = supabase_admin.table("test_answer_keys").select("*").eq(
+            "id", answer_key_id
+        ).eq("user_id", user["user_id"]).execute()
+
+        if not result.data:
+            raise HTTPException(status_code=404, detail="Еталон тесту не знайдено")
+
+        return result.data[0]
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        print(f"❌ Помилка отримання еталону: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 if __name__ == "__main__":

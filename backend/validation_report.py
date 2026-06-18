@@ -3,13 +3,21 @@ from typing import Dict
 
 def format_report_for_api(validation_result: Dict) -> Dict:
     """Форматує звіт для API відповіді (JSON)"""
-    return {
+    result = {
         "overall_compliance": validation_result.get("overall_compliance", "unknown"),
         "compliance_score": validation_result.get("compliance_score", 0.0),
         "summary": validation_result.get("summary", {}),
         "issues": validation_result.get("issues", []),
         "report_id": validation_result.get("report_id")
     }
+
+    # Додаємо test_details та grade якщо є (для перевірки тестів)
+    if "test_details" in validation_result:
+        result["test_details"] = validation_result["test_details"]
+    if "grade" in validation_result:
+        result["grade"] = validation_result["grade"]
+
+    return result
 
 
 def format_report_for_chat(validation_result: Dict) -> str:
